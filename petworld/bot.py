@@ -21,6 +21,8 @@ COGS = [
     "cogs.pet_commands",
     "cogs.economy",
     "cogs.battle",
+    "cogs.hatching",
+    "cogs.breeding",
 ]
 
 
@@ -37,16 +39,15 @@ class PetWorldBot(commands.Bot):
                 await self.load_extension(cog)
                 log.info(f"Loaded cog: {cog}")
             except Exception as e:
-                log.error(f"Failed to load cog {cog}: {e}")
+                log.error(f"Failed to load cog {cog}: {e}", exc_info=True)
 
-        log.info("Syncing slash commands...")
+        log.info("Syncing slash commands globally…")
         await self.tree.sync()
         log.info("Slash commands synced.")
-
         self.age_pets_task.start()
 
     async def on_ready(self):
-        log.info(f"PetWorld is online as {self.user} (ID: {self.user.id})")
+        log.info(f"PetWorld online as {self.user} (ID: {self.user.id})")
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.playing,
@@ -55,17 +56,14 @@ class PetWorldBot(commands.Bot):
         )
 
     async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
-        log.error(f"Command error in {interaction.command}: {error}")
+        log.error(f"Command error in {interaction.command}: {error}", exc_info=True)
         if not interaction.response.is_done():
-            await interaction.response.send_message(
-                "❌ An error occurred. Please try again!", ephemeral=True
-            )
+            await interaction.response.send_message("❌ An error occurred. Please try again!", ephemeral=True)
 
     @tasks.loop(hours=24)
     async def age_pets_task(self):
-        """Increment pet age daily."""
         conn = data.get_conn()
-        conn.execute("UPDATE pets SET age_days = age_days + 1 WHERE is_active = 1")
+        conn.execute("UPDATE pets SET age_days = age_days + 1 WHERE is_active = 1 AND is_egg = 0")
         conn.commit()
         conn.close()
         log.info("Pet ages incremented.")
@@ -77,7 +75,7 @@ class PetWorldBot(commands.Bot):
 
 async def main():
     data.init_db()
-    log.info("Database initialized.")
+    log.info("Database initialised.")
     bot = PetWorldBot()
     async with bot:
         await bot.start(TOKEN)
