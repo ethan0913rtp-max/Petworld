@@ -6,6 +6,7 @@ from datetime import datetime
 import logging
 
 import data
+from keep_alive import keep_alive
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,6 +61,74 @@ class PetWorldBot(commands.Bot):
             )
         )
 
+    async def on_guild_join(self, guild: discord.Guild):
+        """Send a welcome embed when the bot is added to a new server."""
+        channel = None
+        # Prefer a channel named general/welcome/bot-commands; fall back to first writable channel
+        preferred = ("general", "welcome", "bot-commands", "bot", "bots")
+        for name in preferred:
+            ch = discord.utils.get(guild.text_channels, name=name)
+            if ch and ch.permissions_for(guild.me).send_messages:
+                channel = ch
+                break
+        if channel is None:
+            for ch in guild.text_channels:
+                if ch.permissions_for(guild.me).send_messages:
+                    channel = ch
+                    break
+        if channel is None:
+            return
+
+        embed = discord.Embed(
+            title="🐾 Welcome to PetWorld!",
+            description=(
+                "PetWorld is a pet-raising RPG that lives entirely inside Discord.\n"
+                "Adopt a pet, raise it, battle other trainers, evolve, breed, hunt for treasure — all via slash commands!"
+            ),
+            color=discord.Color.from_rgb(100, 200, 150)
+        )
+        embed.add_field(
+            name="🚀 Getting Started",
+            value=(
+                "`/adopt <name> <species>` — Adopt your first pet\n"
+                "`/species` — Browse all 54 available species\n"
+                "`/status` — Check your pet's stats\n"
+                "`/help` — Full command reference"
+            ),
+            inline=False
+        )
+        embed.add_field(
+            name="⚔️ Core Gameplay",
+            value=(
+                "`/feed` `/play` `/rest` `/train` — Care for your pet daily\n"
+                "`/battle @user` — Challenge other trainers\n"
+                "`/hunt` — Send your pet on a 2h treasure hunt\n"
+                "`/quests` — Daily & weekly quests for big rewards"
+            ),
+            inline=False
+        )
+        embed.add_field(
+            name="🌱 Advanced",
+            value=(
+                "`/breed @user` — Breed rare pets with other players\n"
+                "`/hatch` — Hatch eggs into powerful creatures\n"
+                "`/shop` — Gear up with hats, outfits & power items\n"
+                "`/profile` — View badges, stats & rival record"
+            ),
+            inline=False
+        )
+        embed.add_field(
+            name="🐉 54 Species · 8 Elements · Evolutions at Lv.25 & 50",
+            value="Every species has a unique element, rarity, and evolution path. Which will you choose?",
+            inline=False
+        )
+        embed.set_footer(text="Use /adopt to begin your journey! Good luck, Trainer 🎮")
+        try:
+            await channel.send(embed=embed)
+            log.info(f"Sent welcome message to #{channel.name} in {guild.name}")
+        except Exception as e:
+            log.warning(f"Could not send welcome to {guild.name}: {e}")
+
     async def on_app_command_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
         log.error(f"Command error in {interaction.command}: {error}", exc_info=True)
         if not interaction.response.is_done():
@@ -81,6 +150,7 @@ class PetWorldBot(commands.Bot):
 async def main():
     data.init_db()
     log.info("Database initialised.")
+    keep_alive(port=5000)
     bot = PetWorldBot()
     async with bot:
         await bot.start(TOKEN)

@@ -158,6 +158,23 @@ class Battle(commands.Cog):
         _handle_levelup(embed, my_pet,  rewards["xp"])
         _handle_levelup(embed, opp_pet, opp_rewards["xp"])
 
+        # Rival bonus
+        record = data.get_rival_record(user_id)
+        rival_id_set = str(record.get("rival_id") or "")
+        if rival_id_set == opp_id:
+            if result == "win":
+                rival_bonus = 30
+                winner_now  = data.get_player(user_id)
+                data.update_player(user_id, coins=winner_now["coins"] + rival_bonus)
+                data.increment_stat(user_id, "rival_wins")
+                embed.add_field(
+                    name="🗡️ Rival Defeated!",
+                    value=f"⚔️ You beat your rival! **+{rival_bonus} bonus coins**",
+                    inline=False
+                )
+            elif result == "lose":
+                data.increment_stat(user_id, "rival_losses")
+
         # Quest + achievement tracking
         data.track_quest_action(user_id, "battle")
         if result == "win":

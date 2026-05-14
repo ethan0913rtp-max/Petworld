@@ -17,6 +17,67 @@ class Social(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    # ── /setrival ─────────────────────────────────────────────────────────────
+
+    @app_commands.command(name="setrival", description="Declare another player as your rival for bonus battle rewards")
+    @app_commands.describe(rival="The player to set as your rival")
+    async def setrival(self, interaction: discord.Interaction, rival: discord.Member):
+        user_id  = str(interaction.user.id)
+        rival_id = str(rival.id)
+
+        if rival.id == interaction.user.id:
+            await interaction.response.send_message("❌ You can't set yourself as your rival!", ephemeral=True)
+            return
+        if rival.bot:
+            await interaction.response.send_message("❌ Bots can't be rivals!", ephemeral=True)
+            return
+
+        rival_player = data.get_player(rival_id)
+        if not rival_player:
+            await interaction.response.send_message(
+                f"❌ **{rival.display_name}** hasn't started playing PetWorld yet. "
+                f"They need to `/adopt` a pet first!", ephemeral=True
+            )
+            return
+
+        record = data.get_rival_record(user_id)
+        changed = record.get("rival_id") and record["rival_id"] != rival_id
+
+        data.set_rival(user_id, rival_id)
+
+        embed = discord.Embed(
+            title="⚔️ Rival Declared!",
+            description=f"**{interaction.user.display_name}** has set **{rival.display_name}** as their rival!",
+            color=discord.Color.red()
+        )
+        if changed:
+            embed.add_field(name="🔄 Changed", value="Your previous rival record has been reset.", inline=False)
+        embed.add_field(
+            name="🎯 Rival Perks",
+            value=(
+                "🪙 **+30 bonus coins** every time you win a `/battle` against your rival\n"
+                "🗡️ Progress toward the **Rival Slayer** badge (beat them 5 times)\n"
+                "📊 Head-to-head record shown in your `/profile`"
+            ),
+            inline=False
+        )
+        rival_pet = data.get_active_pet(rival_id)
+        if rival_pet:
+            s_data = pet_lib.SPECIES.get(rival_pet["species"], {})
+            evo_emoji, evo_title = pet_lib.get_evo_display(rival_pet["species"], rival_pet.get("evo_stage", 0))
+            embed.add_field(
+                name=f"🐾 {rival.display_name}'s Active Pet",
+                value=(
+                    f"{evo_emoji} **{rival_pet['name']}** — {evo_title}\n"
+                    f"{s_data.get('emoji','')} {rival_pet['species'].capitalize()} | "
+                    f"Lv.{rival_pet['level']} | "
+                    f"{pet_lib.ELEMENT_COLORS.get(s_data.get('element',''),'')} {s_data.get('element','')}"
+                ),
+                inline=False
+            )
+        embed.set_footer(text="Use /battle to challenge your rival and earn bonus rewards!")
+        await interaction.response.send_message(embed=embed)
+
     # ── /rename ───────────────────────────────────────────────────────────────
 
     @app_commands.command(name="rename", description="Give your active pet a new name")

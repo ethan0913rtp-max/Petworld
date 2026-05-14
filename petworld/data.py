@@ -5,14 +5,15 @@ from datetime import datetime
 
 # ── Badge definitions (used by profile, achievements, cogs) ───────────────────
 BADGE_INFO: dict[str, dict] = {
-    "first_pet":  {"emoji": "🐾", "label": "First Steps",       "desc": "Adopted your first pet"},
-    "first_win":  {"emoji": "⚔️", "label": "First Victory",     "desc": "Won your first battle"},
-    "first_evo":  {"emoji": "✨", "label": "Evolved",           "desc": "Your pet evolved for the first time"},
-    "level_50":   {"emoji": "🏆", "label": "Level 50 Master",   "desc": "Raised a pet to Level 50"},
-    "hatch_5":    {"emoji": "🥚", "label": "Egg Hatcher",       "desc": "Hatched 5 eggs"},
-    "breed_3":    {"emoji": "🧬", "label": "Breeder",           "desc": "Bred 3 pets"},
-    "win_10":     {"emoji": "👑", "label": "Battle Champion",   "desc": "Won 10 battles"},
-    "quest_7":    {"emoji": "📋", "label": "Quest Legend",      "desc": "Completed 7 daily quests"},
+    "first_pet":    {"emoji": "🐾", "label": "First Steps",       "desc": "Adopted your first pet"},
+    "first_win":    {"emoji": "⚔️", "label": "First Victory",     "desc": "Won your first battle"},
+    "first_evo":    {"emoji": "✨", "label": "Evolved",           "desc": "Your pet evolved for the first time"},
+    "level_50":     {"emoji": "🏆", "label": "Level 50 Master",   "desc": "Raised a pet to Level 50"},
+    "hatch_5":      {"emoji": "🥚", "label": "Egg Hatcher",       "desc": "Hatched 5 eggs"},
+    "breed_3":      {"emoji": "🧬", "label": "Breeder",           "desc": "Bred 3 pets"},
+    "win_10":       {"emoji": "👑", "label": "Battle Champion",   "desc": "Won 10 battles"},
+    "quest_7":      {"emoji": "📋", "label": "Quest Legend",      "desc": "Completed 7 daily quests"},
+    "rival_slayer": {"emoji": "🗡️", "label": "Rival Slayer",      "desc": "Defeated your declared rival 5 times"},
 }
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "petworld.db")
@@ -136,6 +137,9 @@ def init_db():
         ("total_battles_won",       "INTEGER DEFAULT 0"),
         ("total_eggs_hatched",      "INTEGER DEFAULT 0"),
         ("total_daily_quests_done", "INTEGER DEFAULT 0"),
+        ("rival_id",                "TEXT DEFAULT NULL"),
+        ("rival_wins",              "INTEGER DEFAULT 0"),
+        ("rival_losses",            "INTEGER DEFAULT 0"),
     ]:
         _add_column_if_missing(c, "players", col, defn)
 
@@ -471,6 +475,25 @@ def get_all_eggs(user_id: str) -> list:
     conn.close()
     return [_parse_pet(dict(r)) for r in rows]
 
+def set_rival(user_id: str, rival_id: str):
+    """Declare a new rival, resetting the head-to-head record."""
+    conn = get_conn()
+    conn.execute(
+        "UPDATE players SET rival_id=?, rival_wins=0, rival_losses=0 WHERE user_id=?",
+        (rival_id, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+def get_rival_record(user_id: str) -> dict:
+    """Return rival_id, rival_wins, rival_losses for a player."""
+    conn = get_conn()
+    row  = conn.execute(
+        "SELECT rival_id, rival_wins, rival_losses FROM players WHERE user_id=?", (user_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else {}
+
 def increment_stat(user_id: str, stat: str, amount: int = 1):
     """Safely increment a counter column on the players table."""
     conn = get_conn()
@@ -520,14 +543,15 @@ def check_and_award_achievements(user_id: str) -> list[str]:
     earned  = set(get_achievements(user_id))
 
     conditions: dict[str, bool] = {
-        "first_pet": stats["total_pets"] >= 1,
-        "first_win": stats.get("total_battles_won", 0) >= 1,
-        "first_evo": stats.get("total_evolutions", 0) >= 1,
-        "level_50":  stats.get("max_pet_level", 0) >= 50,
-        "hatch_5":   stats.get("total_eggs_hatched", 0) >= 5,
-        "breed_3":   stats.get("total_pets_bred", 0) >= 3,
-        "win_10":    stats.get("total_battles_won", 0) >= 10,
-        "quest_7":   stats.get("total_daily_quests_done", 0) >= 7,
+        "first_pet":    stats["total_pets"] >= 1,
+        "first_win":    stats.get("total_battles_won", 0) >= 1,
+        "first_evo":    stats.get("total_evolutions", 0) >= 1,
+        "level_50":     stats.get("max_pet_level", 0) >= 50,
+        "hatch_5":      stats.get("total_eggs_hatched", 0) >= 5,
+        "breed_3":      stats.get("total_pets_bred", 0) >= 3,
+        "win_10":       stats.get("total_battles_won", 0) >= 10,
+        "quest_7":      stats.get("total_daily_quests_done", 0) >= 7,
+        "rival_slayer": stats.get("rival_wins", 0) >= 5,
     }
 
     new_badges = []

@@ -125,6 +125,32 @@ class Profile(commands.Cog):
                 inline=False
             )
 
+        # Rival section
+        record = data.get_rival_record(user_id)
+        rival_id_str = str(record.get("rival_id") or "")
+        if rival_id_str:
+            rival_wins   = record.get("rival_wins",   0)
+            rival_losses = record.get("rival_losses", 0)
+            try:
+                rival_user = await self.bot.fetch_user(int(rival_id_str))
+                rival_name = rival_user.display_name
+            except Exception:
+                rival_name = f"User #{rival_id_str}"
+
+            record_str = f"**{rival_wins}W** — **{rival_losses}L**"
+            if rival_wins >= rival_losses and rival_wins > 0:
+                verdict = "📈 You're winning the rivalry!"
+            elif rival_losses > rival_wins:
+                verdict = "📉 They have the edge — time to train harder!"
+            else:
+                verdict = "⚖️ Even rivalry so far."
+
+            embed.add_field(
+                name="🗡️ Rival",
+                value=f"**{rival_name}** · {record_str}\n_{verdict}_",
+                inline=False
+            )
+
         embed.set_thumbnail(url=target.display_avatar.url)
         embed.set_footer(text="Use /quests, /battle, /hunt and more to earn badges!")
         await interaction.response.send_message(embed=embed)
