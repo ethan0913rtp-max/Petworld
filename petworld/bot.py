@@ -23,6 +23,8 @@ COGS = [
     "cogs.battle",
     "cogs.hatching",
     "cogs.breeding",
+    "cogs.hunting",
+    "cogs.quests_cog",
 ]
 
 

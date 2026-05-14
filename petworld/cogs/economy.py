@@ -3,14 +3,12 @@ from discord.ext import commands
 from discord import app_commands
 from datetime import datetime, timedelta
 import random
-import json
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import data
 import pets as pet_lib
-
 
 DAILY_COOLDOWN_HOURS = 20
 WORK_COOLDOWN_HOURS  = 1
@@ -77,10 +75,7 @@ class Economy(commands.Cog):
         equip        = pet.get("equipment") or {}
         base_pay     = random.randint(15, 40)
         level_bonus  = pet["level"] * 3
-        collar_bonus = 0
-        if equip.get("collar") == "gold_collar":
-            collar_bonus = int((base_pay + level_bonus) * 0.20)
-        # Bee earns extra
+        collar_bonus = int((base_pay + level_bonus) * 0.20) if equip.get("collar") == "gold_collar" else 0
         if pet["species"] == "bee":
             collar_bonus += int((base_pay + level_bonus) * 0.15)
 
@@ -91,6 +86,8 @@ class Economy(commands.Cog):
         data.update_pet(pet["pet_id"], energy=pet_lib.clamp(pet["energy"] - energy_cost))
         _work_cooldowns[user_id] = datetime.utcnow()
 
+        completed = data.track_quest_action(user_id, "work")
+
         jobs = [
             f"**{pet['name']}** delivered packages around the city 📦",
             f"**{pet['name']}** helped at a bakery 🥐",
@@ -98,12 +95,15 @@ class Economy(commands.Cog):
             f"**{pet['name']}** guarded a treasure vault 🏛️",
             f"**{pet['name']}** won a talent show 🎤",
         ]
+        evo_emoji, _ = pet_lib.get_evo_display(pet["species"], pet.get("evo_stage", 0))
         embed = discord.Embed(title="💼 Work Complete!", description=random.choice(jobs), color=discord.Color.green())
         embed.add_field(name="💰 Earned", value=f"+{pay} coins", inline=True)
         embed.add_field(name="⚡ Energy", value=f"-{energy_cost}", inline=True)
         embed.add_field(name="Total",     value=str(player["coins"] + pay), inline=True)
         if collar_bonus:
-            embed.set_footer(text=f"🏅 Collar bonus: +{collar_bonus} coins!")
+            embed.set_footer(text=f"🏅 Collar bonus included: +{collar_bonus} coins!")
+        for q in completed:
+            embed.add_field(name="✅ Quest Complete!", value=f"**{q['description']}** — `/quests` to claim!", inline=False)
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="balance", description="Check your coin balance")
@@ -119,24 +119,21 @@ class Economy(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="shop", description="Browse the full PetWorld item shop")
-    @app_commands.describe(category="Filter by category: all, food, gear")
+    @app_commands.describe(category="Filter: all, food, gear")
     async def shop(self, interaction: discord.Interaction, category: str = "all"):
         category = category.lower()
 
         def include(idata):
             t = idata.get("type", "consumable")
-            if category == "food":
-                return t == "consumable"
-            if category == "gear":
-                return t in ("hat", "outfit", "collar", "accessory")
+            if category == "food":  return t == "consumable"
+            if category == "gear":  return t in ("hat", "outfit", "collar", "accessory")
             return True
 
         embed = discord.Embed(
             title="🏪 PetWorld Shop",
-            description="Use `/buy <item>` to purchase! Gear is equipped with `/equip <slot> <item>`.",
+            description="Buy with `/buy <item>` · Equip gear with `/equip <slot> <item>`",
             color=discord.Color.teal()
         )
-
         sections = {
             "🍽️ Food & Consumables": "consumable",
             "🎩 Hats":               "hat",
@@ -144,31 +141,24 @@ class Economy(commands.Cog):
             "📿 Collars":            "collar",
             "💍 Accessories":        "accessory",
         }
-
         for section_name, section_type in sections.items():
-            items_in_section = [
-                (k, v) for k, v in pet_lib.SHOP_ITEMS.items()
-                if v.get("type") == section_type and include(v)
-            ]
+            items_in_section = [(k, v) for k, v in pet_lib.SHOP_ITEMS.items()
+                                if v.get("type") == section_type and include(v)]
             if not items_in_section:
                 continue
             lines = []
             for item_name, item in items_in_section:
-                effects = []
-                for stat in ("hunger", "happiness", "health", "energy"):
-                    if stat in item:
-                        effects.append(f"+{item[stat]} {stat.capitalize()}")
-                effect_str = f" → {', '.join(effects)}" if effects else ""
-                lines.append(f"{item['emoji']} **{item_name.replace('_',' ').title()}** — {item['cost']}💰{effect_str}\n  _{item['description']}_")
+                effects = [f"+{item[s]} {s.capitalize()}" for s in ("hunger","happiness","health","energy") if s in item]
+                eff_str = f" → {', '.join(effects)}" if effects else ""
+                lines.append(f"{item['emoji']} **{item_name.replace('_',' ').title()}** — {item['cost']}💰{eff_str}\n  _{item['description']}_")
             embed.add_field(name=section_name, value="\n".join(lines), inline=False)
-
         embed.set_footer(text="Use /shop food or /shop gear to filter.")
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="buy", description="Buy an item from the shop")
     @app_commands.describe(item="Item name to buy (e.g. top_hat, armor, apple)")
     async def buy(self, interaction: discord.Interaction, item: str):
-        item = item.lower().replace(" ", "_")
+        item    = item.lower().replace(" ", "_")
         user_id = str(interaction.user.id)
         self.ensure_player(interaction.user)
 
@@ -180,7 +170,7 @@ class Economy(commands.Cog):
         player = data.get_player(user_id)
         if player["coins"] < item_data["cost"]:
             await interaction.response.send_message(
-                f"❌ Need **{item_data['cost']}** coins but you only have **{player['coins']}**.", ephemeral=True
+                f"❌ Need **{item_data['cost']}** coins but you have **{player['coins']}**.", ephemeral=True
             )
             return
 
@@ -203,20 +193,15 @@ class Economy(commands.Cog):
         user_id = str(interaction.user.id)
         self.ensure_player(interaction.user)
         inv = data.get_inventory(user_id)
-
         if not inv:
             await interaction.response.send_message("🎒 Your inventory is empty. Visit `/shop`!", ephemeral=True)
             return
 
-        # Group by type
         consumables, gear = [], []
         for item_name, qty in inv.items():
             idata = pet_lib.SHOP_ITEMS.get(item_name, {})
             entry = f"{idata.get('emoji','📦')} **{item_name.replace('_',' ').title()}** ×{qty}"
-            if idata.get("type") == "consumable":
-                consumables.append(entry)
-            else:
-                gear.append(entry)
+            (consumables if idata.get("type") == "consumable" else gear).append(entry)
 
         embed = discord.Embed(title="🎒 Your Inventory", color=discord.Color.blue())
         if consumables:
@@ -231,7 +216,6 @@ class Economy(commands.Cog):
         item    = item.lower().replace(" ", "_")
         user_id = str(interaction.user.id)
         pet     = data.get_active_pet(user_id)
-
         if not pet:
             msg = "🥚 Your pet hasn't hatched yet!" if data.get_active_pet_or_egg(user_id) else "❌ You need a pet!"
             await interaction.response.send_message(msg, ephemeral=True)
@@ -255,7 +239,6 @@ class Economy(commands.Cog):
                 new_val = pet_lib.clamp(pet[stat] + item_data[stat])
                 updates[stat] = new_val
                 effects.append(f"{stat.capitalize()}: +{item_data[stat]} → {new_val}%")
-
         if updates:
             data.update_pet(pet["pet_id"], **updates)
 
@@ -267,7 +250,7 @@ class Economy(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="equip", description="Equip a clothing or accessory item on your pet")
-    @app_commands.describe(slot="Slot: hat, outfit, collar, or accessory", item="Item name to equip (must be in inventory)")
+    @app_commands.describe(slot="Slot: hat, outfit, collar, or accessory", item="Item name to equip")
     async def equip(self, interaction: discord.Interaction, slot: str, item: str):
         slot    = slot.lower()
         item    = item.lower().replace(" ", "_")
@@ -275,7 +258,7 @@ class Economy(commands.Cog):
 
         if slot not in pet_lib.EQUIP_SLOTS:
             await interaction.response.send_message(
-                f"❌ Invalid slot `{slot}`. Valid slots: {', '.join(f'`{s}`' for s in pet_lib.EQUIP_SLOTS)}", ephemeral=True
+                f"❌ Invalid slot. Valid: {', '.join(f'`{s}`' for s in pet_lib.EQUIP_SLOTS)}", ephemeral=True
             )
             return
 
@@ -294,18 +277,14 @@ class Economy(commands.Cog):
                 f"❌ `{item}` is a **{item_data.get('type','?')}**, not a **{slot}**.", ephemeral=True
             )
             return
-
-        inv = data.get_inventory(user_id)
-        if inv.get(item, 0) < 1:
-            await interaction.response.send_message(f"❌ You don't own any `{item}`. Buy it from `/shop` first!", ephemeral=True)
+        if data.get_inventory(user_id).get(item, 0) < 1:
+            await interaction.response.send_message(f"❌ You don't own `{item}`. Buy it from `/shop` first!", ephemeral=True)
             return
 
-        equip = pet.get("equipment") or {}
-        # Unequip old item to inventory (return it)
+        equip    = pet.get("equipment") or {}
         old_item = equip.get(slot)
         if old_item:
             data.add_item(user_id, old_item)
-
         equip[slot] = item
         data.remove_item(user_id, item)
         data.update_pet(pet["pet_id"], equipment=equip)
@@ -316,8 +295,8 @@ class Economy(commands.Cog):
             color=discord.Color.from_rgb(255, 182, 193)
         )
         if old_item:
-            old_data = pet_lib.SHOP_ITEMS.get(old_item, {})
-            embed.set_footer(text=f"Previous {slot} ({old_data.get('emoji','')} {old_item.replace('_',' ').title()}) returned to inventory.")
+            old_d = pet_lib.SHOP_ITEMS.get(old_item, {})
+            embed.set_footer(text=f"Previous {slot} ({old_d.get('emoji','')} {old_item.replace('_',' ').title()}) returned to inventory.")
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="unequip", description="Remove an equipped item from your pet")
@@ -325,31 +304,26 @@ class Economy(commands.Cog):
     async def unequip(self, interaction: discord.Interaction, slot: str):
         slot    = slot.lower()
         user_id = str(interaction.user.id)
-
         if slot not in pet_lib.EQUIP_SLOTS:
             await interaction.response.send_message(
                 f"❌ Invalid slot. Valid: {', '.join(f'`{s}`' for s in pet_lib.EQUIP_SLOTS)}", ephemeral=True
             )
             return
-
         pet = data.get_active_pet(user_id)
         if not pet:
             await interaction.response.send_message("❌ You need a hatched pet!", ephemeral=True)
             return
-
         equip    = pet.get("equipment") or {}
         old_item = equip.get(slot)
         if not old_item:
-            await interaction.response.send_message(f"❌ Nothing equipped in the **{slot}** slot.", ephemeral=True)
+            await interaction.response.send_message(f"❌ Nothing equipped in **{slot}**.", ephemeral=True)
             return
-
         equip.pop(slot)
         data.update_pet(pet["pet_id"], equipment=equip)
         data.add_item(user_id, old_item)
-
-        old_data = pet_lib.SHOP_ITEMS.get(old_item, {})
+        old_d = pet_lib.SHOP_ITEMS.get(old_item, {})
         await interaction.response.send_message(
-            f"✅ Removed {old_data.get('emoji','📦')} **{old_item.replace('_',' ').title()}** from {pet['name']}. Returned to inventory."
+            f"✅ Removed {old_d.get('emoji','📦')} **{old_item.replace('_',' ').title()}** from {pet['name']}. Returned to inventory."
         )
 
 

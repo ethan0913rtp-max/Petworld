@@ -282,3 +282,286 @@ def species_list_embed_text() -> str:
         parts = " ".join(f"{d['emoji']}`{n}`" for n, d in members)
         lines.append(f"{cat_emoji.get(cat,'•')} **{cat.capitalize()}**: {parts}")
     return "\n".join(lines)
+
+
+# ── Evolution ─────────────────────────────────────────────────────────────────
+# Two evolutions: stage 1 at level 25, stage 2 at level 50.
+# stat_boost is added to health, hunger, happiness, energy caps (clamped at 100).
+
+_CATEGORY_EVO: dict[str, list] = {
+    "mammals":    [{"emoji":"🦁","title":"Alpha","stat_boost":10},      {"emoji":"🦁","title":"Ancient One","stat_boost":20}],
+    "birds":      [{"emoji":"🦅","title":"Soaring","stat_boost":10},    {"emoji":"🦅","title":"Sky Legend","stat_boost":20}],
+    "reptiles":   [{"emoji":"🐉","title":"Ancient","stat_boost":10},    {"emoji":"🐉","title":"Primordial","stat_boost":20}],
+    "fish":       [{"emoji":"🐟","title":"Deepwater","stat_boost":10},  {"emoji":"🐟","title":"Abyssal","stat_boost":20}],
+    "insects":    [{"emoji":"🦋","title":"Matured","stat_boost":10},    {"emoji":"🦋","title":"Elder","stat_boost":20}],
+    "amphibians": [{"emoji":"🐸","title":"Elder","stat_boost":10},      {"emoji":"🐸","title":"Ancient","stat_boost":20}],
+    "mythical":   [{"emoji":"✨","title":"Awakened","stat_boost":15},   {"emoji":"⭐","title":"Transcendent","stat_boost":30}],
+}
+
+EVOLUTIONS: dict[str, list] = {
+    "cat":        [{"emoji":"🐈",   "title":"Prowler",          "stat_boost":10}, {"emoji":"🐈‍⬛","title":"Shadow Lord",      "stat_boost":20}],
+    "dog":        [{"emoji":"🦮",   "title":"Guardian",         "stat_boost":10}, {"emoji":"🐕‍🦺","title":"Warden",           "stat_boost":20}],
+    "bunny":      [{"emoji":"🐇",   "title":"Swift Hare",       "stat_boost":10}, {"emoji":"🐰", "title":"Moon Bunny",        "stat_boost":18}],
+    "hamster":    [{"emoji":"🐹",   "title":"Speedster",        "stat_boost": 8}, {"emoji":"🐹", "title":"Titan Hamster",     "stat_boost":16}],
+    "fox":        [{"emoji":"🦊",   "title":"Vixen",            "stat_boost":10}, {"emoji":"🦊", "title":"Nine-Tail",         "stat_boost":22}],
+    "wolf":       [{"emoji":"🐺",   "title":"Alpha Wolf",       "stat_boost":12}, {"emoji":"🐺", "title":"Dire Wolf",         "stat_boost":25}],
+    "raccoon":    [{"emoji":"🦝",   "title":"Bandit",           "stat_boost":10}, {"emoji":"🦝", "title":"Master Thief",      "stat_boost":20}],
+    "deer":       [{"emoji":"🦌",   "title":"Stag",             "stat_boost":10}, {"emoji":"🦌", "title":"Celestial Stag",    "stat_boost":20}],
+    "panda":      [{"emoji":"🐼",   "title":"Iron Panda",       "stat_boost":10}, {"emoji":"🐼", "title":"Jade Guardian",     "stat_boost":22}],
+    "koala":      [{"emoji":"🐨",   "title":"Sleepy Elder",     "stat_boost": 8}, {"emoji":"🐨", "title":"Ancient Koala",     "stat_boost":18}],
+    "bear":       [{"emoji":"🐻",   "title":"Grizzly",          "stat_boost":12}, {"emoji":"🐻‍❄️","title":"Glacier Bear",      "stat_boost":25}],
+    "tiger":      [{"emoji":"🐯",   "title":"Apex Tiger",       "stat_boost":12}, {"emoji":"🐯", "title":"Shadow Tiger",      "stat_boost":25}],
+    "lion":       [{"emoji":"🦁",   "title":"Mane King",        "stat_boost":12}, {"emoji":"🦁", "title":"Solar Lion",        "stat_boost":25}],
+    "elephant":   [{"emoji":"🐘",   "title":"Tusk Lord",        "stat_boost":12}, {"emoji":"🐘", "title":"Ancient Mammoth",   "stat_boost":25}],
+    "unicorn":    [{"emoji":"🦄",   "title":"Alicorn",          "stat_boost":15}, {"emoji":"🌟", "title":"Celestial",         "stat_boost":30}],
+    "cerberus":   [{"emoji":"🐕",   "title":"Hell Guardian",    "stat_boost":15}, {"emoji":"🐺", "title":"Infernal Warden",   "stat_boost":30}],
+    "kitsune":    [{"emoji":"🦊",   "title":"Seven-Tail",       "stat_boost":15}, {"emoji":"🌟", "title":"Divine Kitsune",    "stat_boost":32}],
+    "kirin":      [{"emoji":"🦒",   "title":"Radiant Kirin",    "stat_boost":15}, {"emoji":"⭐", "title":"Divine Kirin",      "stat_boost":32}],
+    "parrot":     [{"emoji":"🦜",   "title":"Elder Parrot",     "stat_boost":10}, {"emoji":"🦜", "title":"Oracle Parrot",     "stat_boost":20}],
+    "penguin":    [{"emoji":"🐧",   "title":"Commander",        "stat_boost":10}, {"emoji":"🐧", "title":"Emperor",           "stat_boost":20}],
+    "crow":       [{"emoji":"🐦‍⬛","title":"Raven",             "stat_boost":10}, {"emoji":"🐦‍⬛","title":"Shadow Raven",    "stat_boost":22}],
+    "owl":        [{"emoji":"🦉",   "title":"Sage Owl",         "stat_boost":10}, {"emoji":"🦉", "title":"Oracle",            "stat_boost":22}],
+    "flamingo":   [{"emoji":"🦩",   "title":"Rose Queen",       "stat_boost":10}, {"emoji":"🦩", "title":"Eternal Flamingo",  "stat_boost":20}],
+    "toucan":     [{"emoji":"🦚",   "title":"Prism Beak",       "stat_boost":10}, {"emoji":"🦚", "title":"Rainbow Toucan",    "stat_boost":20}],
+    "peacock":    [{"emoji":"🦚",   "title":"Crown Peacock",    "stat_boost":10}, {"emoji":"🦚", "title":"Imperial",          "stat_boost":22}],
+    "eagle":      [{"emoji":"🦅",   "title":"Apex Eagle",       "stat_boost":12}, {"emoji":"🦅", "title":"Storm Lord",        "stat_boost":25}],
+    "hummingbird":[{"emoji":"🐦",   "title":"Blur Wing",        "stat_boost":10}, {"emoji":"🌈", "title":"Prismatic Wing",    "stat_boost":20}],
+    "phoenix":    [{"emoji":"🦅",   "title":"Reborn Phoenix",   "stat_boost":15}, {"emoji":"🌟", "title":"Immortal Blaze",    "stat_boost":30}],
+    "griffin":    [{"emoji":"🦅",   "title":"Royal Griffin",    "stat_boost":15}, {"emoji":"🌟", "title":"Celestial Griffin", "stat_boost":30}],
+    "dragon":     [{"emoji":"🐲",   "title":"Drake",            "stat_boost":12}, {"emoji":"🐲", "title":"Elder Dragon",      "stat_boost":28}],
+    "chameleon":  [{"emoji":"🦎",   "title":"Phantom",          "stat_boost":10}, {"emoji":"🌫️","title":"Void Shade",        "stat_boost":22}],
+    "turtle":     [{"emoji":"🐢",   "title":"Iron Shell",       "stat_boost":10}, {"emoji":"🐢", "title":"Ancient Shell",     "stat_boost":22}],
+    "snake":      [{"emoji":"🐍",   "title":"Viper",            "stat_boost":10}, {"emoji":"🐍", "title":"Shadow Serpent",    "stat_boost":22}],
+    "crocodile":  [{"emoji":"🐊",   "title":"Titan Croc",       "stat_boost":12}, {"emoji":"🐊", "title":"Ancient Behemoth",  "stat_boost":25}],
+    "hydra":      [{"emoji":"🐉",   "title":"Greater Hydra",    "stat_boost":15}, {"emoji":"💀", "title":"Ancient Hydra",     "stat_boost":30}],
+    "shark":      [{"emoji":"🦈",   "title":"Great White",      "stat_boost":12}, {"emoji":"🦈", "title":"Leviathan-Touched", "stat_boost":25}],
+    "jellyfish":  [{"emoji":"🪼",   "title":"Deep Drifter",     "stat_boost":10}, {"emoji":"🌊", "title":"Abyssal Crown",     "stat_boost":22}],
+    "butterfly":  [{"emoji":"🦋",   "title":"Chrysalis",        "stat_boost":10}, {"emoji":"🌸", "title":"Moonwing",          "stat_boost":20}],
+    "firefly":    [{"emoji":"✨",   "title":"Bright Flame",     "stat_boost":10}, {"emoji":"⚡", "title":"Thunder Sprite",    "stat_boost":20}],
+    "sprite":     [{"emoji":"🧚",   "title":"Elder Sprite",     "stat_boost":12}, {"emoji":"⭐", "title":"Arcane Sprite",     "stat_boost":25}],
+    "leviathan":  [{"emoji":"🐉",   "title":"Sea Terror",       "stat_boost":18}, {"emoji":"🌊", "title":"World Ender",       "stat_boost":35}],
+    "thunderbird":[{"emoji":"⚡",   "title":"Storm Hawk",       "stat_boost":15}, {"emoji":"🌩️","title":"Sky God",           "stat_boost":30}],
+}
+
+def check_evolution(species: str, new_level: int) -> dict | None:
+    """Returns evolution dict if new_level (25 or 50) triggers one, else None."""
+    if new_level not in (25, 50):
+        return None
+    idx = 0 if new_level == 25 else 1
+    evo_list = EVOLUTIONS.get(species)
+    if not evo_list:
+        cat = SPECIES.get(species, {}).get("category", "mammals")
+        evo_list = _CATEGORY_EVO.get(cat, [])
+    return evo_list[idx] if idx < len(evo_list) else None
+
+def process_level_up(species: str, current_level: int, current_xp: int,
+                     gained_xp: int, current_evo_stage: int) -> dict:
+    """
+    Calculates the result of gaining XP.
+    Returns a dict with leveled_up, new_level, new_xp, evolved, new_evo_stage, evo_info.
+    """
+    new_xp = current_xp + gained_xp
+    if new_xp < xp_for_next_level(current_level):
+        return {"leveled_up": False, "new_level": current_level, "new_xp": new_xp,
+                "evolved": False, "new_evo_stage": current_evo_stage, "evo_info": None}
+    new_level = current_level + 1
+    evo_info  = check_evolution(species, new_level)
+    new_stage = current_evo_stage + (1 if evo_info else 0)
+    return {"leveled_up": True, "new_level": new_level, "new_xp": 0,
+            "evolved": bool(evo_info), "new_evo_stage": new_stage, "evo_info": evo_info}
+
+def get_evo_display(species: str, evo_stage: int) -> tuple[str, str]:
+    """Returns (emoji, title) for the given evolution stage."""
+    base_emoji = SPECIES.get(species, {}).get("emoji", "🐾")
+    if evo_stage == 0:
+        return base_emoji, "Rookie"
+    idx = evo_stage - 1
+    evo_list = EVOLUTIONS.get(species)
+    if not evo_list:
+        cat = SPECIES.get(species, {}).get("category", "mammals")
+        evo_list = _CATEGORY_EVO.get(cat, [])
+    if evo_list and idx < len(evo_list):
+        return evo_list[idx]["emoji"], evo_list[idx]["title"]
+    return base_emoji, "Elder"
+
+
+# ── Hunting loot by element ───────────────────────────────────────────────────
+
+HUNT_LOOT: dict[str, dict] = {
+    "Fire": {
+        "territory": "Volcanic Plains 🌋",
+        "flavor_lines": [
+            "scrambled through scorched craters and found buried treasure",
+            "sniffed out hot-spring pools where ancient coins had sunk",
+            "chased ember sprites across the lava fields",
+            "dug through ash pits left by old campfires",
+            "scaled a smouldering peak and discovered a hidden cache",
+        ],
+        "coin_range": {"common": (10,25), "uncommon": (20,45), "rare": (40,80), "jackpot": (80,150)},
+        "common":   ["apple", "energy_drink"],
+        "uncommon": ["feast", "potion"],
+        "rare":     ["energy_drink", "feast"],
+        "jackpot":  ["hatch_gem"],
+    },
+    "Water": {
+        "territory": "Ocean Coves & Misty Rivers 🌊",
+        "flavor_lines": [
+            "dove into crystal coves and found sunken treasure",
+            "followed river currents to a hidden grotto",
+            "caught fish in moonlit tide pools",
+            "swam through kelp forests and found rare pearls",
+            "explored a sunken shipwreck full of goodies",
+        ],
+        "coin_range": {"common": (10,25), "uncommon": (20,45), "rare": (40,80), "jackpot": (80,150)},
+        "common":   ["apple", "feast"],
+        "uncommon": ["potion", "feast"],
+        "rare":     ["potion", "energy_drink"],
+        "jackpot":  ["hatch_gem"],
+    },
+    "Earth": {
+        "territory": "Ancient Forests & Mountain Caves 🏔️",
+        "flavor_lines": [
+            "burrowed through mossy earth and struck a vein of gems",
+            "foraged through ancient woodland and gathered rare herbs",
+            "tracked a wild trail deep into a misty forest",
+            "excavated a forgotten tomb hidden under a mountain",
+            "found a hidden meadow full of wild provisions",
+        ],
+        "coin_range": {"common": (12,28), "uncommon": (22,48), "rare": (45,85), "jackpot": (90,160)},
+        "common":   ["apple", "toy"],
+        "uncommon": ["feast", "energy_drink"],
+        "rare":     ["potion", "feast"],
+        "jackpot":  ["hatch_gem"],
+    },
+    "Lightning": {
+        "territory": "Stormy Highlands ⛈️",
+        "flavor_lines": [
+            "raced through electric storm clouds chasing sparks",
+            "surfed a lightning bolt down from the peaks",
+            "found a cache of charged crystals in a clifftop cave",
+            "outran a thunderstorm and found the prize at its eye",
+            "charged through storm-swept fields at blinding speed",
+        ],
+        "coin_range": {"common": (12,28), "uncommon": (25,50), "rare": (45,85), "jackpot": (90,160)},
+        "common":   ["energy_drink", "apple"],
+        "uncommon": ["energy_drink", "toy"],
+        "rare":     ["potion", "energy_drink"],
+        "jackpot":  ["hatch_gem"],
+    },
+    "Shadow": {
+        "territory": "Twilight Ruins & Dark Forests 🌑",
+        "flavor_lines": [
+            "slipped through shadow portals and returned with strange relics",
+            "stalked through haunted ruins under moonlight",
+            "phased through the Dark Forest and found hidden vaults",
+            "picked pockets of unsuspecting ghosts",
+            "lurked at the edge of the Void and snatched rare loot",
+        ],
+        "coin_range": {"common": (15,30), "uncommon": (28,55), "rare": (50,95), "jackpot": (100,175)},
+        "common":   ["apple", "toy"],
+        "uncommon": ["potion", "energy_drink"],
+        "rare":     ["feast", "potion"],
+        "jackpot":  ["hatch_gem"],
+    },
+    "Ice": {
+        "territory": "Frozen Tundra & Ice Caverns ❄️",
+        "flavor_lines": [
+            "skated across frozen lakes and discovered icy treasure troves",
+            "chipped through glacier walls and found ancient artefacts",
+            "tracked polar spirits across the tundra",
+            "dove into ice caves where ancient hoards slept",
+            "caught snowflake crystals that dissolved into rare materials",
+        ],
+        "coin_range": {"common": (10,25), "uncommon": (20,45), "rare": (40,80), "jackpot": (80,150)},
+        "common":   ["apple", "potion"],
+        "uncommon": ["feast", "potion"],
+        "rare":     ["energy_drink", "potion"],
+        "jackpot":  ["hatch_gem"],
+    },
+    "Wind": {
+        "territory": "Sky Islands & Mountain Peaks 🌤️",
+        "flavor_lines": [
+            "rode the updrafts to a hidden sky island full of loot",
+            "chased wind spirits across floating cloud platforms",
+            "spiralled through a tornado and emerged with treasures",
+            "glided to a forgotten eagle's nest stocked with gems",
+            "surfed gale-force winds to a remote mountain summit",
+        ],
+        "coin_range": {"common": (12,28), "uncommon": (25,50), "rare": (50,90), "jackpot": (100,170)},
+        "common":   ["apple", "energy_drink"],
+        "uncommon": ["toy", "feast"],
+        "rare":     ["energy_drink", "potion"],
+        "jackpot":  ["hatch_gem"],
+    },
+    "Lava": {
+        "territory": "Volcanic Islands & Lava Tubes 🌋",
+        "flavor_lines": [
+            "plunged into a lava tube and emerged with molten gold",
+            "wrestled a magma golem for its treasure hoard",
+            "surfed rivers of lava to a legendary volcanic forge",
+            "cracked open obsidian boulders to find gem cores",
+            "survived an eruption and claimed the aftermath riches",
+        ],
+        "coin_range": {"common": (15,35), "uncommon": (30,60), "rare": (55,100), "jackpot": (110,200)},
+        "common":   ["apple", "energy_drink"],
+        "uncommon": ["feast", "energy_drink"],
+        "rare":     ["potion", "feast"],
+        "jackpot":  ["hatch_gem"],
+    },
+}
+
+
+# ── /pet command messages ─────────────────────────────────────────────────────
+
+PET_MESSAGES: dict[str, list[str]] = {
+    "mammals": [
+        "**{name}** nuzzles their head into your hand! 🥰",
+        "You scratch **{name}**'s ears — they're in absolute heaven! ✨",
+        "**{name}** rolls onto their back and demands belly rubs! 😂",
+        "**{name}** leans against you and rumbles contentedly. 💙",
+        "You and **{name}** share a quiet moment. So wholesome! 🫶",
+        "**{name}** bumps your hand with their nose, asking for more pets! 🐾",
+    ],
+    "birds": [
+        "**{name}** fluffs up their feathers in pure delight! 🪶",
+        "**{name}** chirps happily and gently pecks your finger. Adorable! 🐦",
+        "You stroke **{name}**'s sleek feathers — they coo softly. 💙",
+        "**{name}** bows their head, inviting you to scratch their crown! 👑",
+        "**{name}** spreads their wings proudly, showing off for you! 🌟",
+    ],
+    "reptiles": [
+        "**{name}** flicks their tongue at you curiously! 👅",
+        "You gently stroke **{name}**'s cool scales. They close their eyes. 💚",
+        "**{name}** basks in your warmth and lets out a slow, happy breath. ☀️",
+        "**{name}** tilts their head at you with ancient, wise eyes. 🦎",
+        "**{name}** slowly climbs up your arm to get closer to you! 🌿",
+    ],
+    "fish": [
+        "You tap the glass and **{name}** swims over excitedly! 🫧",
+        "**{name}** blows a series of happy bubbles when they see you! 💭",
+        "You watch **{name}** glide gracefully — incredibly relaxing! 🌊",
+        "**{name}** does three laps around the tank in excitement! 🐟",
+        "**{name}** presses up against the glass near your hand. 💙",
+    ],
+    "insects": [
+        "**{name}** lands gently on your outstretched finger! 🌸",
+        "You watch **{name}** flutter and dance in the air just for you! 🌀",
+        "**{name}** glows a little brighter when you're nearby. ✨",
+        "**{name}** rests on your shoulder and seems perfectly content. 🍃",
+        "**{name}** does a little victory dance in your presence! 💫",
+    ],
+    "amphibians": [
+        "**{name}** ribbits happily and leaps into your cupped hands! 🍃",
+        "You gently hold **{name}** — they're surprisingly warm! 💚",
+        "**{name}** inflates their throat pouch in a joyful display! 🎶",
+        "**{name}** blinks their huge eyes at you slowly. Pure trust! 🌿",
+        "**{name}** hops in circles around your feet with glee! 🐸",
+    ],
+    "mythical": [
+        "**{name}** emanates a warm magical aura that envelops you! 🌟",
+        "The air shimmers as **{name}** gracefully acknowledges you. ✨",
+        "**{name}** gazes at you with ancient, knowing eyes. You feel seen. 👁️",
+        "**{name}** channels a gentle blessing through your fingertips. 💫",
+        "A soft light glows around **{name}** as they nuzzle close. 🌙",
+    ],
+}

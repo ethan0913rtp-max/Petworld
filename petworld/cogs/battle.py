@@ -10,9 +10,31 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import data
 import pets as pet_lib
 
-
 _battle_cooldowns: dict[str, datetime] = {}
 BATTLE_COOLDOWN_MINUTES = 10
+
+
+def _handle_levelup(embed: discord.Embed, pet: dict, xp_reward: int):
+    lu = pet_lib.process_level_up(
+        pet["species"], pet["level"], pet["xp"], xp_reward, pet.get("evo_stage", 0)
+    )
+    db_updates = {"xp": lu["new_xp"]}
+    if lu["leveled_up"]:
+        db_updates["level"] = lu["new_level"]
+        if lu["evolved"]:
+            db_updates["evo_stage"] = lu["new_evo_stage"]
+    data.update_pet(pet["pet_id"], **db_updates)
+
+    if lu["leveled_up"]:
+        embed.add_field(name="🎊 Level Up!", value=f"**{pet['name']}** reached Level **{lu['new_level']}**!", inline=False)
+    if lu["evolved"]:
+        evo = lu["evo_info"]
+        embed.add_field(
+            name="✨ EVOLUTION!",
+            value=f"**{pet['name']}** evolved into **{evo['emoji']} {evo['title']}**! (+{evo['stat_boost']} all stats)",
+            inline=False
+        )
+        data.apply_evo_stat_boost(pet["pet_id"], evo["stat_boost"])
 
 
 class Battle(commands.Cog):
@@ -35,7 +57,7 @@ class Battle(commands.Cog):
         last = _battle_cooldowns.get(user_id)
         if last and (datetime.utcnow() - last) < timedelta(minutes=BATTLE_COOLDOWN_MINUTES):
             mins = int((timedelta(minutes=BATTLE_COOLDOWN_MINUTES) - (datetime.utcnow() - last)).total_seconds() / 60)
-            await interaction.response.send_message(f"⏰ Your pet needs to recover! Battle again in **{mins}m**.", ephemeral=True)
+            await interaction.response.send_message(f"⏰ Battle cooldown: **{mins}m** remaining.", ephemeral=True)
             return
 
         my_pet  = data.get_active_pet(user_id)
@@ -62,15 +84,12 @@ class Battle(commands.Cog):
         my_equip  = my_pet.get("equipment") or {}
         opp_equip = opp_pet.get("equipment") or {}
 
-        my_base  = pet_lib.battle_score(my_pet,  my_equip)
-        opp_base = pet_lib.battle_score(opp_pet, opp_equip)
+        my_score  = int(pet_lib.battle_score(my_pet,  my_equip)  * elem_mult)  + random.randint(-10, 10)
+        opp_score = int(pet_lib.battle_score(opp_pet, opp_equip) * opp_mult)   + random.randint(-10, 10)
 
-        my_score  = int(my_base  * elem_mult)  + random.randint(-10, 10)
-        opp_score = int(opp_base * opp_mult)   + random.randint(-10, 10)
-
-        my_emoji  = my_s["emoji"]
-        opp_emoji = opp_s["emoji"]
-        my_elem_e  = pet_lib.ELEMENT_COLORS.get(my_elem,  "")
+        my_evo_emoji,  _ = pet_lib.get_evo_display(my_pet["species"],  my_pet.get("evo_stage", 0))
+        opp_evo_emoji, _ = pet_lib.get_evo_display(opp_pet["species"], opp_pet.get("evo_stage", 0))
+        my_elem_e  = pet_lib.ELEMENT_COLORS.get(my_elem, "")
         opp_elem_e = pet_lib.ELEMENT_COLORS.get(opp_elem, "")
 
         _battle_cooldowns[user_id] = datetime.utcnow()
@@ -78,38 +97,33 @@ class Battle(commands.Cog):
         my_player  = data.get_player(user_id)
         opp_player = data.get_player(opp_id)
 
-        # Build elemental flavour note
         if elem_mult > 1.0:
-            elem_note = f"⚡ **{my_elem}** is strong against **{opp_elem}**! ({my_pet['name']} +50% dmg)"
+            elem_note = f"⚡ **{my_elem}** is strong vs **{opp_elem}**! (+50% dmg)"
         elif elem_mult < 1.0:
-            elem_note = f"🛡️ **{opp_elem}** resists **{my_elem}**! ({my_pet['name']} -35% dmg)"
+            elem_note = f"🛡️ **{opp_elem}** resists **{my_elem}**! (-35% dmg)"
         else:
-            elem_note = f"⚖️ Neutral elements — no advantage either way."
+            elem_note = "⚖️ Neutral matchup."
 
         embed = discord.Embed(
             title="⚔️ Elemental Pet Battle!",
             description=(
-                f"{my_emoji} **{my_pet['name']}** ({my_elem_e}{my_elem}, Lv.{my_pet['level']}) "
-                f"vs {opp_emoji} **{opp_pet['name']}** ({opp_elem_e}{opp_elem}, Lv.{opp_pet['level']})"
+                f"{my_evo_emoji} **{my_pet['name']}** ({my_elem_e}{my_elem}, Lv.{my_pet['level']}) "
+                f"vs {opp_evo_emoji} **{opp_pet['name']}** ({opp_elem_e}{opp_elem}, Lv.{opp_pet['level']})"
             ),
             color=discord.Color.red()
         )
         embed.add_field(name="🌊 Element Matchup", value=elem_note, inline=False)
 
-        # Battle rounds
         rounds = []
-        my_wins = opp_wins = 0
         for i in range(3):
-            r_my  = random.randint(1, 6) + my_pet["level"] + (2 if elem_mult > 1.0 else 0)
-            r_opp = random.randint(1, 6) + opp_pet["level"] + (2 if opp_mult > 1.0 else 0)
+            r_my  = random.randint(1, 6) + my_pet["level"]  + (2 if elem_mult > 1.0 else 0)
+            r_opp = random.randint(1, 6) + opp_pet["level"] + (2 if opp_mult  > 1.0 else 0)
             if r_my > r_opp:
-                rounds.append(f"Round {i+1}: {my_emoji} **{my_pet['name']}** strikes! ✅")
-                my_wins += 1
+                rounds.append(f"Round {i+1}: {my_evo_emoji} **{my_pet['name']}** strikes! ✅")
             elif r_opp > r_my:
-                rounds.append(f"Round {i+1}: {opp_emoji} **{opp_pet['name']}** counters! ✅")
-                opp_wins += 1
+                rounds.append(f"Round {i+1}: {opp_evo_emoji} **{opp_pet['name']}** counters! ✅")
             else:
-                rounds.append(f"Round {i+1}: 🤝 Both hit simultaneously!")
+                rounds.append(f"Round {i+1}: 🤝 Simultaneous hit!")
 
         embed.add_field(name="⚔️ Battle Log", value="\n".join(rounds), inline=False)
 
@@ -120,67 +134,61 @@ class Battle(commands.Cog):
         else:
             result, outcome_msg = "draw", "🤝 It's a draw!"
 
-        opp_result = {"win":"lose","lose":"win","draw":"draw"}[result]
-        rewards      = pet_lib.BATTLE_REWARDS[result]
-        opp_rewards  = pet_lib.BATTLE_REWARDS[opp_result]
+        opp_result  = {"win":"lose","lose":"win","draw":"draw"}[result]
+        rewards     = dict(pet_lib.BATTLE_REWARDS[result])
+        opp_rewards = dict(pet_lib.BATTLE_REWARDS[opp_result])
 
-        # Fox species coin bonus
-        if my_pet["species"] in ("fox", "kitsune"):
-            rewards = dict(rewards); rewards["coins"] = int(rewards["coins"] * 1.25)
-        if opp_pet["species"] in ("fox", "kitsune"):
-            opp_rewards = dict(opp_rewards); opp_rewards["coins"] = int(opp_rewards["coins"] * 1.25)
+        # Fox/kitsune coin bonus
+        if my_pet["species"]  in ("fox", "kitsune"): rewards["coins"]     = int(rewards["coins"]     * 1.25)
+        if opp_pet["species"] in ("fox", "kitsune"): opp_rewards["coins"] = int(opp_rewards["coins"] * 1.25)
 
-        data.update_player(user_id, coins=my_player["coins"]   + rewards["coins"])
-        data.update_player(opp_id,  coins=opp_player["coins"]  + opp_rewards["coins"])
-        data.update_pet(my_pet["pet_id"],  xp=my_pet["xp"]   + rewards["xp"])
-        data.update_pet(opp_pet["pet_id"], xp=opp_pet["xp"]  + opp_rewards["xp"])
+        data.update_player(user_id, coins=my_player["coins"]  + rewards["coins"])
+        data.update_player(opp_id,  coins=opp_player["coins"] + opp_rewards["coins"])
 
         embed.add_field(
             name="🏅 Result",
             value=(
                 f"{outcome_msg}\n"
-                f"{my_emoji} **{my_pet['name']}**: +{rewards['coins']} 💰  +{rewards['xp']} XP\n"
-                f"{opp_emoji} **{opp_pet['name']}**: +{opp_rewards['coins']} 💰  +{opp_rewards['xp']} XP"
+                f"{my_evo_emoji} **{my_pet['name']}**: +{rewards['coins']} 💰  +{rewards['xp']} XP\n"
+                f"{opp_evo_emoji} **{opp_pet['name']}**: +{opp_rewards['coins']} 💰  +{opp_rewards['xp']} XP"
             ),
             inline=False
         )
 
-        # Level-ups
-        my_level, my_leveled = pet_lib.check_level_up({"level": my_pet["level"], "xp": my_pet["xp"] + rewards["xp"]})
-        if my_leveled:
-            data.update_pet(my_pet["pet_id"], level=my_level, xp=0)
-            embed.add_field(name="🎊 Level Up!", value=f"**{my_pet['name']}** is now Level {my_level}!", inline=False)
+        _handle_levelup(embed, my_pet,  rewards["xp"])
+        _handle_levelup(embed, opp_pet, opp_rewards["xp"])
 
-        opp_level, opp_leveled = pet_lib.check_level_up({"level": opp_pet["level"], "xp": opp_pet["xp"] + opp_rewards["xp"]})
-        if opp_leveled:
-            data.update_pet(opp_pet["pet_id"], level=opp_level, xp=0)
-            embed.add_field(name="🎊 Level Up!", value=f"**{opp_pet['name']}** is now Level {opp_level}!", inline=False)
+        # Quest tracking
+        data.track_quest_action(user_id, "battle")
+        if result == "win":
+            completed = data.track_quest_action(user_id, "win_battle")
+            for q in completed:
+                embed.add_field(name="✅ Quest Complete!", value=f"**{q['description']}** — `/quests` to claim!", inline=False)
 
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="leaderboard", description="View the top pets in PetWorld")
     async def leaderboard(self, interaction: discord.Interaction):
-        rows   = data.get_leaderboard(10)
-        embed  = discord.Embed(title="🏆 PetWorld Leaderboard", color=discord.Color.gold())
+        rows  = data.get_leaderboard(10)
+        embed = discord.Embed(title="🏆 PetWorld Leaderboard", color=discord.Color.gold())
         medals = ["🥇", "🥈", "🥉"]
 
         for i, row in enumerate(rows):
             medal    = medals[i] if i < 3 else f"{i+1}."
-            emoji    = pet_lib.get_species_emoji(row.get("species") or "cat")
+            species  = row.get("species") or "cat"
+            s        = pet_lib.SPECIES.get(species, {})
+            evo_emoji, evo_title = pet_lib.get_evo_display(species, row.get("evo_stage", 0) or 0)
+            rar_e    = pet_lib.RARITY_EMOJI.get(row.get("rarity", "common"), "⚪")
+            elem_e   = pet_lib.ELEMENT_COLORS.get(s.get("element", ""), "")
             pet_name = row.get("pet_name") or "No Pet"
-            level    = row.get("level") or 0
-            rar_e    = pet_lib.RARITY_EMOJI.get(row.get("rarity","common"),"⚪")
-            s        = pet_lib.SPECIES.get(row.get("species",""), {})
-            elem_e   = pet_lib.ELEMENT_COLORS.get(s.get("element",""), "")
             embed.add_field(
                 name=f"{medal} {row['username']}",
-                value=f"{emoji} **{pet_name}** Lv.{level} {rar_e}{elem_e} | 💰 {row['coins']}",
+                value=f"{evo_emoji} **{pet_name}** {evo_title} Lv.{row.get('level',0)} {rar_e}{elem_e} | 💰 {row['coins']}",
                 inline=False
             )
 
         if not rows:
             embed.description = "No players yet! Use `/adopt` to start."
-
         await interaction.response.send_message(embed=embed)
 
 

@@ -79,6 +79,26 @@ def init_db():
         )
     """)
 
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS quests (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id       TEXT,
+            quest_type    TEXT,
+            element       TEXT,
+            template_id   TEXT,
+            description   TEXT,
+            action        TEXT,
+            progress      INTEGER DEFAULT 0,
+            target        INTEGER,
+            status        TEXT DEFAULT 'active',
+            reward_coins  INTEGER DEFAULT 0,
+            reward_xp     INTEGER DEFAULT 0,
+            reward_item   TEXT,
+            created_at    TEXT,
+            expires_at    TEXT
+        )
+    """)
+
     # Migrations for existing DBs
     for col, defn in [
         ("is_egg",     "INTEGER DEFAULT 0"),
@@ -86,6 +106,7 @@ def init_db():
         ("rarity",     "TEXT DEFAULT 'common'"),
         ("parent1_id", "INTEGER DEFAULT NULL"),
         ("parent2_id", "INTEGER DEFAULT NULL"),
+        ("evo_stage",  "INTEGER DEFAULT 0"),
     ]:
         _add_column_if_missing(c, "pets", col, defn)
 
@@ -278,7 +299,8 @@ def get_pet_by_id(pet_id: int):
 def get_leaderboard(limit: int = 10):
     conn = get_conn()
     rows = conn.execute(
-        """SELECT p.username, p.coins, pet.name as pet_name, pet.level, pet.species, pet.rarity
+        """SELECT p.username, p.coins, pet.name as pet_name, pet.level, pet.species,
+                  pet.rarity, COALESCE(pet.evo_stage,0) as evo_stage
            FROM players p
            LEFT JOIN pets pet ON pet.user_id = p.user_id AND pet.is_active = 1 AND pet.is_egg = 0
            ORDER BY pet.level DESC, p.coins DESC
@@ -287,3 +309,122 @@ def get_leaderboard(limit: int = 10):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ── Evolution ─────────────────────────────────────────────────────────────────
+
+def apply_evo_stat_boost(pet_id: int, boost: int):
+    """Increase a pet's current stats by the evolution boost amount (capped at 100)."""
+    conn = get_conn()
+    row  = conn.execute("SELECT health, hunger, happiness, energy FROM pets WHERE pet_id=?", (pet_id,)).fetchone()
+    if row:
+        new_health    = min(100, row["health"]    + boost)
+        new_hunger    = min(100, row["hunger"]    + boost)
+        new_happiness = min(100, row["happiness"] + boost)
+        new_energy    = min(100, row["energy"]    + boost)
+        conn.execute(
+            "UPDATE pets SET health=?, hunger=?, happiness=?, energy=? WHERE pet_id=?",
+            (new_health, new_hunger, new_happiness, new_energy, pet_id),
+        )
+        conn.commit()
+    conn.close()
+
+
+# ── Quests ────────────────────────────────────────────────────────────────────
+
+def ensure_user_quests(user_id: str, element: str) -> list[dict]:
+    """
+    Returns a user's active quests, generating new ones if all have expired or none exist.
+    """
+    import quests as quest_lib
+
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM quests WHERE user_id=? AND status != 'claimed' ORDER BY id",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+
+    existing = [dict(r) for r in rows]
+
+    # Remove expired active quests
+    now_str = datetime.utcnow().isoformat()
+    for q in existing:
+        if q["status"] == "active" and quest_lib.is_expired(q["expires_at"]):
+            _expire_quest(q["id"])
+
+    # Refresh list after expiry
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM quests WHERE user_id=? AND status != 'claimed'",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    live = [dict(r) for r in rows]
+
+    active_or_complete = [q for q in live if q["status"] in ("active", "completed")]
+    if active_or_complete:
+        return active_or_complete
+
+    # Generate fresh quests
+    new_quests = quest_lib.generate_new_quests(user_id, element)
+    conn = get_conn()
+    for q in new_quests:
+        conn.execute(
+            """INSERT INTO quests
+               (user_id, quest_type, element, template_id, description, action,
+                progress, target, status, reward_coins, reward_xp, reward_item, created_at, expires_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (q["user_id"], q["quest_type"], q["element"], q["template_id"],
+             q["description"], q["action"], q["progress"], q["target"],
+             q["status"], q["reward_coins"], q["reward_xp"], q.get("reward_item"),
+             q["created_at"], q["expires_at"]),
+        )
+    conn.commit()
+    rows = conn.execute(
+        "SELECT * FROM quests WHERE user_id=? AND status='active'",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def _expire_quest(quest_id: int):
+    conn = get_conn()
+    conn.execute("UPDATE quests SET status='claimed' WHERE id=?", (quest_id,))
+    conn.commit()
+    conn.close()
+
+
+def track_quest_action(user_id: str, action: str) -> list[dict]:
+    """
+    Increments progress for all active quests matching the action.
+    Returns a list of quests that were just completed (progress hit target).
+    """
+    conn   = get_conn()
+    rows   = conn.execute(
+        "SELECT * FROM quests WHERE user_id=? AND action=? AND status='active'",
+        (user_id, action),
+    ).fetchall()
+    newly_completed = []
+    for row in rows:
+        q           = dict(row)
+        new_progress = q["progress"] + 1
+        if new_progress >= q["target"]:
+            conn.execute("UPDATE quests SET progress=?, status='completed' WHERE id=?", (q["target"], q["id"]))
+            q["progress"] = q["target"]
+            q["status"]   = "completed"
+            newly_completed.append(q)
+        else:
+            conn.execute("UPDATE quests SET progress=? WHERE id=?", (new_progress, q["id"]))
+    conn.commit()
+    conn.close()
+    return newly_completed
+
+
+def claim_quest(quest_id: int):
+    """Mark a completed quest as claimed."""
+    conn = get_conn()
+    conn.execute("UPDATE quests SET status='claimed' WHERE id=? AND status='completed'", (quest_id,))
+    conn.commit()
+    conn.close()
