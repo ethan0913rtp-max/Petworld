@@ -3,6 +3,18 @@ import json
 import os
 from datetime import datetime
 
+# ── Badge definitions (used by profile, achievements, cogs) ───────────────────
+BADGE_INFO: dict[str, dict] = {
+    "first_pet":  {"emoji": "🐾", "label": "First Steps",       "desc": "Adopted your first pet"},
+    "first_win":  {"emoji": "⚔️", "label": "First Victory",     "desc": "Won your first battle"},
+    "first_evo":  {"emoji": "✨", "label": "Evolved",           "desc": "Your pet evolved for the first time"},
+    "level_50":   {"emoji": "🏆", "label": "Level 50 Master",   "desc": "Raised a pet to Level 50"},
+    "hatch_5":    {"emoji": "🥚", "label": "Egg Hatcher",       "desc": "Hatched 5 eggs"},
+    "breed_3":    {"emoji": "🧬", "label": "Breeder",           "desc": "Bred 3 pets"},
+    "win_10":     {"emoji": "👑", "label": "Battle Champion",   "desc": "Won 10 battles"},
+    "quest_7":    {"emoji": "📋", "label": "Quest Legend",      "desc": "Completed 7 daily quests"},
+}
+
 DB_PATH = os.path.join(os.path.dirname(__file__), "petworld.db")
 
 def get_conn():
@@ -80,6 +92,16 @@ def init_db():
     """)
 
     c.execute("""
+        CREATE TABLE IF NOT EXISTS achievements (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    TEXT,
+            badge_id   TEXT,
+            earned_at  TEXT,
+            UNIQUE(user_id, badge_id)
+        )
+    """)
+
+    c.execute("""
         CREATE TABLE IF NOT EXISTS quests (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id       TEXT,
@@ -109,6 +131,13 @@ def init_db():
         ("evo_stage",  "INTEGER DEFAULT 0"),
     ]:
         _add_column_if_missing(c, "pets", col, defn)
+
+    for col, defn in [
+        ("total_battles_won",       "INTEGER DEFAULT 0"),
+        ("total_eggs_hatched",      "INTEGER DEFAULT 0"),
+        ("total_daily_quests_done", "INTEGER DEFAULT 0"),
+    ]:
+        _add_column_if_missing(c, "players", col, defn)
 
     conn.commit()
     conn.close()
@@ -428,3 +457,92 @@ def claim_quest(quest_id: int):
     conn.execute("UPDATE quests SET status='claimed' WHERE id=? AND status='completed'", (quest_id,))
     conn.commit()
     conn.close()
+
+
+# ── Achievement system ────────────────────────────────────────────────────────
+
+def get_all_eggs(user_id: str) -> list:
+    """Return all active, unhatched eggs for a user."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM pets WHERE user_id=? AND is_egg=1 AND is_active=1 ORDER BY created_at",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    return [_parse_pet(dict(r)) for r in rows]
+
+def increment_stat(user_id: str, stat: str, amount: int = 1):
+    """Safely increment a counter column on the players table."""
+    conn = get_conn()
+    conn.execute(f"UPDATE players SET {stat} = COALESCE({stat}, 0) + ? WHERE user_id=?", (amount, user_id))
+    conn.commit()
+    conn.close()
+
+def get_achievements(user_id: str) -> list[str]:
+    """Return list of badge_ids already earned by the user."""
+    conn  = get_conn()
+    rows  = conn.execute("SELECT badge_id FROM achievements WHERE user_id=?", (user_id,)).fetchall()
+    conn.close()
+    return [r["badge_id"] for r in rows]
+
+def get_player_stats(user_id: str) -> dict:
+    """Return a merged dict of player row + computed pet stats for achievement checks."""
+    conn = get_conn()
+    player = conn.execute("SELECT * FROM players WHERE user_id=?", (user_id,)).fetchone()
+    if not player:
+        conn.close()
+        return {}
+    stats = dict(player)
+
+    stats["total_pets"] = conn.execute(
+        "SELECT COUNT(*) FROM pets WHERE user_id=?", (user_id,)
+    ).fetchone()[0]
+    stats["max_pet_level"] = conn.execute(
+        "SELECT COALESCE(MAX(level),0) FROM pets WHERE user_id=?", (user_id,)
+    ).fetchone()[0]
+    stats["total_pets_bred"] = conn.execute(
+        "SELECT COUNT(*) FROM pets WHERE user_id=? AND parent1_id IS NOT NULL", (user_id,)
+    ).fetchone()[0]
+    stats["total_evolutions"] = conn.execute(
+        "SELECT COUNT(*) FROM pets WHERE user_id=? AND evo_stage > 0", (user_id,)
+    ).fetchone()[0]
+    conn.close()
+    return stats
+
+def check_and_award_achievements(user_id: str) -> list[str]:
+    """
+    Evaluates all badge conditions and inserts any newly earned badges.
+    Returns the list of newly awarded badge IDs.
+    """
+    stats   = get_player_stats(user_id)
+    if not stats:
+        return []
+    earned  = set(get_achievements(user_id))
+
+    conditions: dict[str, bool] = {
+        "first_pet": stats["total_pets"] >= 1,
+        "first_win": stats.get("total_battles_won", 0) >= 1,
+        "first_evo": stats.get("total_evolutions", 0) >= 1,
+        "level_50":  stats.get("max_pet_level", 0) >= 50,
+        "hatch_5":   stats.get("total_eggs_hatched", 0) >= 5,
+        "breed_3":   stats.get("total_pets_bred", 0) >= 3,
+        "win_10":    stats.get("total_battles_won", 0) >= 10,
+        "quest_7":   stats.get("total_daily_quests_done", 0) >= 7,
+    }
+
+    new_badges = []
+    conn = get_conn()
+    now  = datetime.utcnow().isoformat()
+    for badge_id, met in conditions.items():
+        if met and badge_id not in earned:
+            try:
+                conn.execute(
+                    "INSERT OR IGNORE INTO achievements (user_id, badge_id, earned_at) VALUES (?,?,?)",
+                    (user_id, badge_id, now),
+                )
+                new_badges.append(badge_id)
+            except Exception:
+                pass
+    conn.commit()
+    conn.close()
+    return new_badges

@@ -158,12 +158,18 @@ class Battle(commands.Cog):
         _handle_levelup(embed, my_pet,  rewards["xp"])
         _handle_levelup(embed, opp_pet, opp_rewards["xp"])
 
-        # Quest tracking
+        # Quest + achievement tracking
         data.track_quest_action(user_id, "battle")
         if result == "win":
+            data.increment_stat(user_id, "total_battles_won")
             completed = data.track_quest_action(user_id, "win_battle")
             for q in completed:
                 embed.add_field(name="✅ Quest Complete!", value=f"**{q['description']}** — `/quests` to claim!", inline=False)
+
+        new_badges = data.check_and_award_achievements(user_id)
+        for badge in new_badges:
+            b = data.BADGE_INFO.get(badge, {})
+            embed.add_field(name="🏅 Badge Unlocked!", value=f"{b.get('emoji','')} **{b.get('label', badge)}** — _{b.get('desc','')}_", inline=False)
 
         await interaction.response.send_message(embed=embed)
 

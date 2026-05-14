@@ -134,6 +134,10 @@ class ClaimQuestsView(discord.ui.View):
         if total_coins:
             data.update_player(user_id, coins=player["coins"] + total_coins)
 
+        daily_count = sum(1 for q in self.claimable if q.get("quest_type") == "daily")
+        if daily_count:
+            data.increment_stat(user_id, "total_daily_quests_done", daily_count)
+
         pet_fresh = data.get_active_pet(user_id)
         level_msg = ""
         if pet_fresh and total_xp:
@@ -153,6 +157,8 @@ class ClaimQuestsView(discord.ui.View):
                     level_msg += f"\n✨ **EVOLUTION!** → {evo['emoji']} **{evo['title']}** (+{evo['stat_boost']} to all stats!)"
                     data.apply_evo_stat_boost(pet_fresh["pet_id"], evo["stat_boost"])
 
+        new_badges = data.check_and_award_achievements(user_id)
+
         embed = discord.Embed(
             title="🎁 Quest Rewards Claimed!",
             description=f"💰 **+{total_coins} coins** | ✨ **+{total_xp} XP**{level_msg}",
@@ -164,6 +170,9 @@ class ClaimQuestsView(discord.ui.View):
                 item_d = pet_lib.SHOP_ITEMS.get(item_name, {})
                 item_lines.append(f"{item_d.get('emoji','📦')} {item_name.replace('_',' ').title()}")
             embed.add_field(name="📦 Items Received", value="\n".join(item_lines), inline=False)
+        for badge in new_badges:
+            b = data.BADGE_INFO.get(badge, {})
+            embed.add_field(name="🏅 Badge Unlocked!", value=f"{b.get('emoji','')} **{b.get('label', badge)}** — _{b.get('desc','')}_", inline=False)
         embed.set_footer(text="New quests will be available after your current ones expire.")
         await interaction.response.edit_message(embed=embed, view=None)
 

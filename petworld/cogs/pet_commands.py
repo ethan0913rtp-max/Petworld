@@ -86,6 +86,7 @@ class PetCommands(commands.Cog):
 
         elem_e = pet_lib.ELEMENT_COLORS.get(s_data["element"], "")
         rar_e  = pet_lib.RARITY_EMOJI.get(rarity, "⚪")
+        new_badges = data.check_and_award_achievements(user_id)
 
         if is_egg:
             embed = discord.Embed(
@@ -108,6 +109,9 @@ class PetCommands(commands.Cog):
         embed.add_field(name="Rarity",   value=f"{rar_e} {rarity.capitalize()}", inline=True)
         embed.add_field(name="Category", value=s_data["category"].capitalize(), inline=True)
         embed.add_field(name="Trait",    value=s_data["description"], inline=False)
+        for badge in new_badges:
+            b = data.BADGE_INFO.get(badge, {})
+            embed.add_field(name="🏅 Badge Unlocked!", value=f"{b.get('emoji','')} **{b.get('label', badge)}** — _{b.get('desc','')}_", inline=False)
         embed.set_footer(text="Use /status to check on your pet!")
         await interaction.response.send_message(embed=embed)
 

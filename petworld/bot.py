@@ -25,6 +25,9 @@ COGS = [
     "cogs.breeding",
     "cogs.hunting",
     "cogs.quests_cog",
+    "cogs.profile",
+    "cogs.social",
+    "cogs.help_cmd",
 ]
 
 

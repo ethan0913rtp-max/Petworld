@@ -76,6 +76,7 @@ async def _do_hatch(interaction: discord.Interaction, egg: dict, used_gem: bool)
     from datetime import datetime
     now = datetime.utcnow().isoformat()
     data.update_pet(egg["pet_id"], is_egg=0, last_fed=now, last_played=now, last_rested=now, last_trained=now)
+    data.increment_stat(user_id, "total_eggs_hatched")
 
     s_data  = pet_lib.SPECIES.get(egg["species"], {})
     elem_e  = pet_lib.ELEMENT_COLORS.get(s_data.get("element", ""), "")
@@ -89,6 +90,12 @@ async def _do_hatch(interaction: discord.Interaction, egg: dict, used_gem: bool)
     embed.add_field(name="Element",  value=f"{elem_e} {s_data.get('element', '?')}", inline=True)
     embed.add_field(name="Rarity",   value=f"{rar_e} {egg.get('rarity','common').capitalize()}", inline=True)
     embed.add_field(name="Trait",    value=s_data.get("description", ""), inline=False)
+
+    new_badges = data.check_and_award_achievements(user_id)
+    for badge in new_badges:
+        b = data.BADGE_INFO.get(badge, {})
+        embed.add_field(name="🏅 Badge Unlocked!", value=f"{b.get('emoji','')} **{b.get('label', badge)}** — _{b.get('desc','')}_", inline=False)
+
     if used_gem:
         embed.set_footer(text="💎 Hatch Gem used!")
     else:
