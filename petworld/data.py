@@ -130,7 +130,7 @@ def init_db():
         ("parent1_id", "INTEGER DEFAULT NULL"),
         ("parent2_id", "INTEGER DEFAULT NULL"),
         ("evo_stage",  "INTEGER DEFAULT 0"),
-    ]:
+    ]:("variant",    "INTEGER DEFAULT 1"),
         _add_column_if_missing(c, "pets", col, defn)
 
     for col, defn in [
