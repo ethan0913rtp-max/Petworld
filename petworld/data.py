@@ -224,13 +224,14 @@ def create_pet(user_id: str, name: str, species: str, is_egg: bool = False, rari
     now = datetime.utcnow().isoformat()
     s_data = SPECIES.get(species, {})
     actual_rarity = rarity or s_data.get("rarity", "common")
+    variant = random.randint(1, 50)
     conn.execute(
         """INSERT INTO pets (user_id, name, species, level, xp, hunger, happiness, health, energy,
            age_days, last_fed, last_played, last_rested, last_trained, is_active, created_at,
-           is_egg, equipment, rarity, parent1_id, parent2_id)
-           VALUES (?,?,?,1,0,100,100,100,100,0,?,?,?,?,1,?,?,?,?,?,?)""",
+           is_egg, equipment, rarity, parent1_id, parent2_id, variant)
+           VALUES (?,?,?,1,0,100,100,100,100,0,?,?,?,?,1,?,?,?,?,?,?,?,?)""",
         (user_id, name, species, now, now, now, now, now, is_egg, "{}",
-         actual_rarity, parent1_id, parent2_id),
+         actual_rarity, parent1_id, parent2_id, variant),
     )
     conn.commit()
     conn.close()
