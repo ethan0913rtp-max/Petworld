@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import data
 import pets as pet_lib
+import images as image_lib
 
 _pet_cooldowns: dict[str, datetime] = {}
 PET_COOLDOWN_MINUTES = 30
@@ -196,6 +197,7 @@ class PetCommands(commands.Cog):
                 embed.add_field(name="👗 Equipment", value="\n".join(slot_lines), inline=False)
 
         embed.set_footer(text="Use /feed /play /rest /train /hunt to care for your pet")
+        embed.set_image(url=image_lib.get_pet_image(pet["species"], pet.get("variant", 1)))
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="feed", description="Feed your pet to restore hunger")
