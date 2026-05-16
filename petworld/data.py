@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import os
+import random
 from datetime import datetime
 
 # ── Badge definitions (used by profile, achievements, cogs) ───────────────────
